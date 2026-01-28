@@ -43,9 +43,9 @@ class MainViewModel : ViewModel() {
     fun processVideo(context: Context) {
         val videoUri = _videoUri.value ?: return
         
-        if (videoProcessor == null) {
-            videoProcessor = VideoProcessor(context)
-        }
+        // 가속기 모드 변경 시 재초기화 필요하므로 항상 새로 생성
+        videoProcessor?.release()
+        videoProcessor = VideoProcessor(context)
         
         // 임시 파일로 먼저 처리 (앱 내부 저장소)
         val tempFile = File(

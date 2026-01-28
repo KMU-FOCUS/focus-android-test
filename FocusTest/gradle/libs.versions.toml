@@ -12,6 +12,15 @@ lifecycleViewmodel = "2.10.0"
 coroutines = "1.9.0"
 opencv = "4.12.0"
 media3 = "1.4.1"
+# LiteRT (TensorFlow Lite) - 최신 버전으로 NPU/GPU 가속 지원 강화
+tensorflowLite = "2.16.1"
+tensorflowLiteGpu = "2.16.1"
+# Google Play Services TFLite - NPU 자동 가속 지원
+playServicesTfliteJava = "16.1.0"
+playServicesTfliteGpu = "16.2.0"
+# ONNX Runtime - NNAPI EP로 NPU 가속
+onnxRuntime = "1.20.0"
+roomExternalAntlr = "2.8.4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -35,6 +44,15 @@ opencv-android = { group = "org.opencv", name = "opencv", version.ref = "opencv"
 androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 androidx-media3-common = { group = "androidx.media3", name = "media3-common", version.ref = "media3" }
+# LiteRT (TensorFlow Lite) 코어 + GPU
+tensorflow-lite = { group = "org.tensorflow", name = "tensorflow-lite", version.ref = "tensorflowLite" }
+tensorflow-lite-gpu = { group = "org.tensorflow", name = "tensorflow-lite-gpu", version.ref = "tensorflowLiteGpu" }
+# Google Play Services TFLite - NPU/GPU 자동 가속 (S25 최적화)
+play-services-tflite-java = { group = "com.google.android.gms", name = "play-services-tflite-java", version.ref = "playServicesTfliteJava" }
+play-services-tflite-gpu = { group = "com.google.android.gms", name = "play-services-tflite-gpu", version.ref = "playServicesTfliteGpu" }
+# ONNX Runtime - NNAPI EP로 NPU 가속 (YuNet용)
+onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxRuntime" }
+androidx-room-external-antlr = { group = "androidx.room", name = "room-external-antlr", version.ref = "roomExternalAntlr" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

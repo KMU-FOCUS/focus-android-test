@@ -14,7 +14,7 @@ import org.opencv.imgproc.Imgproc
  * 얼굴 검출 후 바운딩 박스 그리기 (신뢰도에 따라 색상 변경)
  */
 class FrameProcessor(
-    private val faceDetector: YuNetFaceDetector
+    private val faceDetector: FaceDetector
 ) {
     
     /**
@@ -24,11 +24,16 @@ class FrameProcessor(
      * @return 처리된 프레임 (바운딩 박스 그려진 프레임)
      */
     fun processFrame(frame: Bitmap): Bitmap {
-        // 원본 복사
-        val result = frame.copy(Bitmap.Config.ARGB_8888, true)
-        
         // 얼굴 검출 (Python: _, faces = detector.detect(small_image))
         val detectedFaces = faceDetector.detectFaces(frame)
+        
+        // 얼굴이 없으면 원본 반환 (불필요한 복사 방지)
+        if (detectedFaces.isEmpty()) {
+            return frame
+        }
+        
+        // 원본 복사
+        val result = frame.copy(Bitmap.Config.ARGB_8888, true)
         
         // 각 얼굴에 대해 바운딩 박스 그리기
         val canvas = Canvas(result)

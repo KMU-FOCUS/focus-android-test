@@ -61,11 +61,23 @@ dependencies {
     // OpenCV
     implementation(libs.opencv.android)
     
+    // LiteRT (TensorFlow Lite) - NPU/GPU 가속 지원
+    implementation(libs.tensorflow.lite)
+    implementation(libs.tensorflow.lite.gpu)
+    
+    // Google Play Services TFLite - S25 NPU/GPU 자동 가속
+    implementation(libs.play.services.tflite.java)
+    implementation(libs.play.services.tflite.gpu)
+    
+    // ONNX Runtime - NNAPI EP로 NPU 가속 (YuNet용)
+    implementation(libs.onnxruntime.android)
+    
     // Media3 for video playback
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.common)
-    
+    implementation(libs.androidx.room.external.antlr)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

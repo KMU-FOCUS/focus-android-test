@@ -1,13 +1,12 @@
 package com.kmu_focus.focustest.processing
 
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Rect
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.media.MediaMuxer
-import android.util.Log
 import android.view.Surface
 import java.io.File
 
@@ -36,6 +35,7 @@ class OpenCVVideoWriter(
     private var frameIndex = 0L
     private var presentationTimeUs = 0L
     private val fps: Int
+    private var isFirstFrame = true  // 첫 프레임 플래그
     
     private val bufferInfo = MediaCodec.BufferInfo()
     
@@ -48,18 +48,43 @@ class OpenCVVideoWriter(
     }
     
     private fun initialize(outputPath: String, width: Int, height: Int) {
-        Log.d(TAG, "Initializing encoder: ${width}x${height} @ ${fps}fps")
-        
         // 비디오 포맷 생성
         val format = MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, width * height * 4) // 비트레이트
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1초마다 키프레임
         }
         
-        // 인코더 생성 및 설정
-        encoder = MediaCodec.createEncoderByType(MIME_TYPE).apply {
+        // 하드웨어 인코더 우선 선택
+        encoder = try {
+            // 하드웨어 코덱 목록에서 H.264 인코더 찾기
+            val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+            var hardwareEncoder: MediaCodec? = null
+            
+            for (codecInfo in codecList.codecInfos) {
+                if (!codecInfo.isEncoder) continue
+                if (codecInfo.isHardwareAccelerated && codecInfo.supportedTypes.contains(MIME_TYPE)) {
+                    try {
+                        hardwareEncoder = MediaCodec.createByCodecName(codecInfo.name)
+                        android.util.Log.d(TAG, "하드웨어 인코더 사용: ${codecInfo.name}")
+                        break
+                    } catch (e: Exception) {
+                        // 이 코덱 사용 불가, 다음 시도
+                        continue
+                    }
+                }
+            }
+            
+            // 하드웨어 코덱을 찾지 못하면 기본 방식 사용
+            hardwareEncoder ?: MediaCodec.createEncoderByType(MIME_TYPE)
+        } catch (e: Exception) {
+            // 하드웨어 코덱 선택 실패 시 기본 방식
+            android.util.Log.w(TAG, "하드웨어 인코더 선택 실패, 기본 인코더 사용: ${e.message}")
+            MediaCodec.createEncoderByType(MIME_TYPE)
+        }
+        
+        encoder?.apply {
             configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             inputSurface = createInputSurface()
             start()
@@ -67,8 +92,6 @@ class OpenCVVideoWriter(
         
         // Muxer 생성
         muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        
-        Log.d(TAG, "Encoder initialized successfully")
     }
     
     fun writeFrame(bitmap: Bitmap) {
@@ -76,6 +99,13 @@ class OpenCVVideoWriter(
         val encoder = encoder ?: return
         
         try {
+            // 첫 프레임은 타임스탬프를 0으로 설정
+            presentationTimeUs = if (isFirstFrame) {
+                0L
+            } else {
+                frameIndex * 1_000_000L / fps
+            }
+            
             // Bitmap을 Surface에 그리기
             val canvas = surface.lockHardwareCanvas()
             try {
@@ -91,15 +121,17 @@ class OpenCVVideoWriter(
                 surface.unlockCanvasAndPost(canvas)
             }
             
-            // 타임스탬프 계산
-            presentationTimeUs = frameIndex * 1_000_000L / fps
-            
             // 인코더 출력 처리
             drainEncoder(false)
             
+            // 첫 프레임 처리 후 플래그 해제
+            if (isFirstFrame) {
+                isFirstFrame = false
+            }
+            
             frameIndex++
         } catch (e: Exception) {
-            Log.e(TAG, "Error writing frame", e)
+            // 에러 로그 최소화
         }
     }
     
@@ -123,17 +155,13 @@ class OpenCVVideoWriter(
                 
                 outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     if (muxerStarted) {
-                        Log.w(TAG, "Format changed after muxer started")
                         continue
                     }
                     
                     val newFormat = encoder.outputFormat
-                    Log.d(TAG, "Encoder output format changed: $newFormat")
-                    
                     trackIndex = muxer.addTrack(newFormat)
                     muxer.start()
                     muxerStarted = true
-                    Log.d(TAG, "Muxer started, track index: $trackIndex")
                 }
                 
                 outputBufferIndex >= 0 -> {
@@ -145,23 +173,32 @@ class OpenCVVideoWriter(
                     }
                     
                     if (bufferInfo.size != 0) {
+                        // muxer가 시작되지 않았으면 대기
                         if (!muxerStarted) {
-                            Log.w(TAG, "Muxer not started, skipping frame")
-                        } else {
-                            encodedData.position(bufferInfo.offset)
-                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                            
-                            // 실제 프레젠테이션 타임 사용
-                            bufferInfo.presentationTimeUs = presentationTimeUs
-                            
-                            muxer.writeSampleData(trackIndex, encodedData, bufferInfo)
+                            encoder.releaseOutputBuffer(outputBufferIndex, false)
+                            continue
                         }
+                        
+                        encodedData.position(bufferInfo.offset)
+                        encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                        
+                        // 첫 프레임은 키프레임이어야 함 - 키프레임이 나올 때까지 대기
+                        val isKeyFrame = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
+                        
+                        if (isFirstFrame && !isKeyFrame) {
+                            // 첫 프레임인데 키프레임이 아니면 스킵하고 다음 버퍼 대기
+                            encoder.releaseOutputBuffer(outputBufferIndex, false)
+                            continue
+                        }
+                        
+                        // 프레젠테이션 타임 설정 및 쓰기
+                        bufferInfo.presentationTimeUs = presentationTimeUs
+                        muxer.writeSampleData(trackIndex, encodedData, bufferInfo)
                     }
                     
                     encoder.releaseOutputBuffer(outputBufferIndex, false)
                     
                     if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        Log.d(TAG, "End of stream reached")
                         return
                     }
                 }
@@ -170,8 +207,6 @@ class OpenCVVideoWriter(
     }
     
     fun release() {
-        Log.d(TAG, "Finishing encoder, total frames: $frameIndex")
-        
         try {
             // EOS 신호 전송
             encoder?.signalEndOfInputStream()
@@ -179,19 +214,19 @@ class OpenCVVideoWriter(
             // 남은 출력 처리
             drainEncoder(true)
         } catch (e: Exception) {
-            Log.e(TAG, "Error signaling end of stream", e)
+            // 릴리즈 중 에러는 무시
         } finally {
             // 리소스 해제
             try {
                 encoder?.stop()
             } catch (e: Exception) {
-                Log.e(TAG, "Error stopping encoder", e)
+                // 무시
             }
             
             try {
                 encoder?.release()
             } catch (e: Exception) {
-                Log.e(TAG, "Error releasing encoder", e)
+                // 무시
             }
             encoder = null
             
@@ -200,20 +235,18 @@ class OpenCVVideoWriter(
                     muxer?.stop()
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error stopping muxer", e)
+                // 무시
             }
             
             try {
                 muxer?.release()
             } catch (e: Exception) {
-                Log.e(TAG, "Error releasing muxer", e)
+                // 무시
             }
             muxer = null
             
             inputSurface?.release()
             inputSurface = null
-            
-            Log.d(TAG, "Encoder finished and released")
         }
     }
 }
