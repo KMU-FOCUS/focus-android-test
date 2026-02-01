@@ -9,6 +9,7 @@ import com.kmu_focus.focustest.processing.detector.FaceDetector
 import com.kmu_focus.focustest.processing.detector.landmark.model3d.FacialLandmarkDetector
 import com.kmu_focus.focustest.processing.detector.recognition.ArcFaceEmbeddingExtractor
 import com.kmu_focus.focustest.processing.detector.recognition.FaceAlignment
+import com.kmu_focus.focustest.processing.detector.mosaic.FaceMosaicApplier
 import com.kmu_focus.focustest.processing.detector.recognition.TrackLabelState
 import com.kmu_focus.focustest.processing.detector.tracking.FaceTracker
 
@@ -33,12 +34,13 @@ class FrameProcessor(
 ) {
 
     companion object {
-        /** 얼굴 모자이크 적용 */
+        /** 얼굴 모자이크 적용 (Owner/Other 사용 시 PENDING·OTHER만, 미사용 시 전체) */
         @JvmStatic
-        var applyFaceMosaic: Boolean = false
+        var applyFaceMosaic: Boolean = true
 
+        /** 화질 저하 방식: 1/n 해상도로 축소 후 복원 (16 = 극단적 저화질, 픽셀 루프 없음) */
         @JvmStatic
-        var mosaicBlockSize: Int = 15
+        var mosaicScaleDownFactor: Int = 16
 
         /** Owner/Other: 앞 N프레임 스킵(얼굴 잘릴 가능성) */
         const val SKIP_FRAMES = 5
@@ -150,19 +152,26 @@ class FrameProcessor(
             return ProcessedFrameResult(frame, frameExport)
         }
 
-        // 모자이크 적용 (5-point 랜드마크 기반 타원 모자이크)
+        // 모자이크: 랜드마크 유효(식별 가능)한 얼굴만 처리. PENDING·OTHER만 적용, 뒷모습/가림은 스킵
         var result = if (applyFaceMosaic) {
-            var mosaicFrame = frame.copy(Bitmap.Config.ARGB_8888, true)
-            for (face in detectedFaces) {
-                face.landmarks?.let { landmarks ->
-                    mosaicFrame = FaceEllipseMask.applyMosaic(
-                        mosaicFrame,
-                        landmarks,
-                        mosaicBlockSize
-                    )
-                }
+            if (trackLabelState != null) {
+                val faceLandmarksPerTrack = detectedFaces.mapIndexed { idx, face ->
+                    Triple(idx, trackingIds.getOrElse(idx) { idx }, face.landmarks)
+                }.filter { (idx, _, landmarks) -> hasValidLandmarks(idx) && landmarks != null }
+                    .map { (_, trackId, landmarks) -> trackId to landmarks!! }
+                FaceMosaicApplier.applyMosaicToPendingAndOther(
+                    frame,
+                    faceLandmarksPerTrack,
+                    { trackId -> trackLabelState!!.getLabel(trackId) },
+                    mosaicScaleDownFactor,
+                    1.05f
+                )
+            } else {
+                val landmarksList = detectedFaces.mapIndexed { idx, face -> idx to face.landmarks }
+                    .filter { (idx, _) -> hasValidLandmarks(idx) }
+                    .mapNotNull { (_, lm) -> lm }
+                FaceMosaicApplier.applyMosaicToFaces(frame, landmarksList, mosaicScaleDownFactor, 1.05f)
             }
-            mosaicFrame
         } else {
             frame.copy(Bitmap.Config.ARGB_8888, true)
         }

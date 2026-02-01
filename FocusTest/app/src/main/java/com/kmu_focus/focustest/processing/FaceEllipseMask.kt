@@ -143,6 +143,159 @@ object FaceEllipseMask {
     }
 
     /**
+     * 타원 영역만 모자이크 적용 (target 비트맵 직접 수정).
+     * 내부 마스크 1회 계산 후 루프에서는 마스크만 참조해 isInsideEllipse 호출 최소화.
+     */
+    fun applyMosaicInPlace(
+        target: Bitmap,
+        landmarks: FaceLandmarks5,
+        blockSize: Int = 20,
+        paddingRatio: Float = 1.05f
+    ) {
+        val ellipse = calculateEllipseParams(landmarks, paddingRatio)
+        val bounds = calculateEllipseBounds(ellipse)
+        val left = bounds.left.toInt().coerceIn(0, target.width - 1)
+        val top = bounds.top.toInt().coerceIn(0, target.height - 1)
+        val right = bounds.right.toInt().coerceIn(1, target.width)
+        val bottom = bounds.bottom.toInt().coerceIn(1, target.height)
+        if (right <= left || bottom <= top) return
+        val w = right - left
+        val h = bottom - top
+        val block = blockSize.coerceAtLeast(4)
+        val pixels = IntArray(w * h)
+        target.getPixels(pixels, 0, w, left, top, w, h)
+        // 타원 내부 마스크 1회만 계산 (isInsideEllipse 호출 w*h번 → 이후 배열 참조만)
+        val inside = BooleanArray(w * h)
+        for (py in 0 until h) {
+            for (px in 0 until w) {
+                inside[py * w + px] = isInsideEllipse((px + left).toFloat(), (py + top).toFloat(), ellipse)
+            }
+        }
+        for (by in 0 until h step block) {
+            for (bx in 0 until w step block) {
+                val cx = (bx + block / 2).coerceIn(0, w - 1)
+                val cy = (by + block / 2).coerceIn(0, h - 1)
+                if (!inside[cy * w + cx]) continue
+                var r = 0
+                var g = 0
+                var b = 0
+                var count = 0
+                val br = (bx + block).coerceAtMost(w)
+                val bb = (by + block).coerceAtMost(h)
+                for (py in by until bb) {
+                    for (px in bx until br) {
+                        if (inside[py * w + px]) {
+                            val pixel = pixels[py * w + px]
+                            r += Color.red(pixel)
+                            g += Color.green(pixel)
+                            b += Color.blue(pixel)
+                            count++
+                        }
+                    }
+                }
+                if (count > 0) {
+                    val color = Color.rgb(r / count, g / count, b / count)
+                    for (py in by until bb) {
+                        for (px in bx until br) {
+                            if (inside[py * w + px]) pixels[py * w + px] = color
+                        }
+                    }
+                }
+            }
+        }
+        target.setPixels(pixels, 0, w, left, top, w, h)
+    }
+
+    /**
+     * 경량 모자이크: 타원의 사각형 바운딩 박스만 블록 평균 처리.
+     * 타원 마스크·isInsideEllipse 없음 → 연산량 최소.
+     */
+    fun applyMosaicInPlaceBbox(
+        target: Bitmap,
+        landmarks: FaceLandmarks5,
+        blockSize: Int = 24,
+        paddingRatio: Float = 1.05f
+    ) {
+        val ellipse = calculateEllipseParams(landmarks, paddingRatio)
+        val bounds = calculateEllipseBounds(ellipse)
+        val left = bounds.left.toInt().coerceIn(0, target.width - 1)
+        val top = bounds.top.toInt().coerceIn(0, target.height - 1)
+        val right = bounds.right.toInt().coerceIn(1, target.width)
+        val bottom = bounds.bottom.toInt().coerceIn(1, target.height)
+        if (right <= left || bottom <= top) return
+        val w = right - left
+        val h = bottom - top
+        val block = blockSize.coerceAtLeast(4)
+        val pixels = IntArray(w * h)
+        target.getPixels(pixels, 0, w, left, top, w, h)
+        for (by in 0 until h step block) {
+            for (bx in 0 until w step block) {
+                val br = (bx + block).coerceAtMost(w)
+                val bb = (by + block).coerceAtMost(h)
+                var r = 0
+                var g = 0
+                var b = 0
+                var count = 0
+                for (py in by until bb) {
+                    for (px in bx until br) {
+                        val pixel = pixels[py * w + px]
+                        r += Color.red(pixel)
+                        g += Color.green(pixel)
+                        b += Color.blue(pixel)
+                        count++
+                    }
+                }
+                if (count > 0) {
+                    val color = Color.rgb(r / count, g / count, b / count)
+                    for (py in by until bb) {
+                        for (px in bx until br) {
+                            pixels[py * w + px] = color
+                        }
+                    }
+                }
+            }
+        }
+        target.setPixels(pixels, 0, w, left, top, w, h)
+    }
+
+    /**
+     * 바운딩 박스 영역 화질만 극단적으로 낮춤 (다운스케일 → 업스케일).
+     * 픽셀 루프 없이 Bitmap.createScaledBitmap만 사용 → 연산량 최소.
+     *
+     * @param scaleDownFactor 1/n 해상도로 축소 (16 → 1/16 크기로 축소 후 복원)
+     */
+    fun applyLowResInPlaceBbox(
+        target: Bitmap,
+        landmarks: FaceLandmarks5,
+        scaleDownFactor: Int = 16,
+        paddingRatio: Float = 1.05f
+    ) {
+        val ellipse = calculateEllipseParams(landmarks, paddingRatio)
+        val bounds = calculateEllipseBounds(ellipse)
+        val left = bounds.left.toInt().coerceIn(0, target.width - 1)
+        val top = bounds.top.toInt().coerceIn(0, target.height - 1)
+        val right = bounds.right.toInt().coerceIn(1, target.width)
+        val bottom = bounds.bottom.toInt().coerceIn(1, target.height)
+        if (right <= left || bottom <= top) return
+        val w = right - left
+        val h = bottom - top
+        val factor = scaleDownFactor.coerceIn(2, 32)
+        val nw = (w / factor).coerceAtLeast(2)
+        val nh = (h / factor).coerceAtLeast(2)
+        val pixels = IntArray(w * h)
+        target.getPixels(pixels, 0, w, left, top, w, h)
+        val region = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        region.setPixels(pixels, 0, w, 0, 0, w, h)
+        val small = Bitmap.createScaledBitmap(region, nw, nh, false)
+        region.recycle()
+        val up = Bitmap.createScaledBitmap(small, w, h, false)
+        small.recycle()
+        up.getPixels(pixels, 0, w, 0, 0, w, h)
+        up.recycle()
+        target.setPixels(pixels, 0, w, left, top, w, h)
+    }
+
+    /**
      * 타원 테두리 그리기 (시각화용)
      */
     fun drawEllipseOutline(
