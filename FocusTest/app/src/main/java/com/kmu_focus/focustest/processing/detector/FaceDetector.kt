@@ -1,6 +1,7 @@
 package com.kmu_focus.focustest.processing.detector
 
 import android.graphics.Bitmap
+import com.kmu_focus.focustest.processing.detector.landmark.yunet.FaceLandmarks5
 
 /**
  * 얼굴 검출기 인터페이스
@@ -19,7 +20,8 @@ data class DetectedFace(
     val y: Int,
     val width: Int,
     val height: Int,
-    val confidence: Float
+    val confidence: Float,
+    val landmarks: FaceLandmarks5? = null
 ) {
     fun toRect(): android.graphics.Rect {
         return android.graphics.Rect(x, y, x + width, y + height)

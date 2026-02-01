@@ -2,8 +2,10 @@ package com.kmu_focus.focustest.processing
 
 import android.content.Context
 import android.net.Uri
+import android.os.Environment
 import com.kmu_focus.focustest.processing.detector.FaceDetector
 import com.kmu_focus.focustest.processing.detector.YuNetOpenCVDetector
+import com.kmu_focus.focustest.processing.detector.landmark.model3d.FacialLandmarkDetector
 import com.kmu_focus.focustest.processing.video.FileVideoSource
 import com.kmu_focus.focustest.processing.video.OpenCVVideoWriter
 import org.opencv.android.OpenCVLoader
@@ -21,6 +23,7 @@ class VideoProcessor(
     
     
     private var faceDetector: FaceDetector? = null
+    private var landmarkDetector: FacialLandmarkDetector? = null
     private var frameProcessor: FrameProcessor? = null
     
     /**
@@ -50,8 +53,18 @@ class VideoProcessor(
             android.util.Log.i("VideoProcessor", "검출기 초기화: ${faceDetector!!.getDetectorType()}")
         }
         
+        // 랜드마크 검출기 초기화
+        if (landmarkDetector == null) {
+            try {
+                landmarkDetector = FacialLandmarkDetector(context)
+                android.util.Log.i("VideoProcessor", "랜드마크 검출기 초기화: ${landmarkDetector!!.getLandmarkCount()}개 포인트")
+            } catch (e: Exception) {
+                android.util.Log.e("VideoProcessor", "랜드마크 검출기 초기화 실패: ${e.message}")
+            }
+        }
+        
         if (frameProcessor == null) {
-            frameProcessor = FrameProcessor(faceDetector!!)
+            frameProcessor = FrameProcessor(faceDetector!!, landmarkDetector)
         }
         
         val videoSource = FileVideoSource(context, videoUri)
@@ -78,6 +91,16 @@ class VideoProcessor(
         var processedFrames = 0
         var totalFaces = 0
         val totalFrames = if (videoInfo.totalFrames > 0) videoInfo.totalFrames else Int.MAX_VALUE
+        val exportFrames = mutableListOf<FrameExport>()
+        // JSON 저장: 다운로드 폴더 우선 (휴대폰에서 확인 가능), 실패 시 비디오 옆 → 앱 외부
+        val videoFile = java.io.File(outputPath)
+        val jsonFilename = videoFile.nameWithoutExtension + "_3dmm.json"
+        val jsonDirDownload = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val jsonDirFallback = videoFile.parentFile?.takeIf { it.exists() }
+            ?: context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+            ?: context.filesDir
+        val jsonFileDownload = java.io.File(jsonDirDownload, jsonFilename).also { it.parentFile?.mkdirs() }
+        val jsonFileFallback = java.io.File(jsonDirFallback, jsonFilename).also { it.parentFile?.mkdirs() }
         
         // 성능 측정용
         val processingTimes = mutableListOf<Long>()
@@ -90,20 +113,18 @@ class VideoProcessor(
                 val frame = videoSource.readFrame()
                 if (frame == null) break
                 
-                // 프레임 처리 (얼굴 검출 → 바운딩 박스 그리기)
-                val processedFrame = frameProcessor!!.processFrame(frame)
+                val fps = videoInfo.fps.toDouble().coerceAtLeast(1.0)
+                val timestamp = processedFrames / fps
+                val result = frameProcessor!!.processFrame(frame, processedFrames, timestamp)
                 
-                // 비디오에 쓰기
-                videoWriter.writeFrame(processedFrame)
+                result.frameExport?.let { exportFrames.add(it) }
+                videoWriter.writeFrame(result.bitmap)
                 
                 processedFrames++
                 
-                // 성능 측정 및 로그 출력 (Python과 동일)
                 val frameTime = System.currentTimeMillis() - frameStart
                 processingTimes.add(frameTime)
                 
-                // 30프레임마다 평균 처리 시간 로그 출력 (Python: if frame_count % 30 == 0)
-                // 로그 출력 최소화 (성능 최적화)
                 if (processedFrames % 30 == 0 && processingTimes.size >= 30) {
                     val avgTime = processingTimes.takeLast(30).average()
                     val currentFps = 1000.0 / avgTime
@@ -113,21 +134,38 @@ class VideoProcessor(
                         "처리: ${avgTime.toInt()}ms")
                 }
                 
-                // 진행률 업데이트 (0.0 ~ 1.0 범위로 제한)
                 val progress = if (totalFrames > 0 && totalFrames != Int.MAX_VALUE) {
                     (processedFrames.toFloat() / totalFrames).coerceIn(0f, 1f)
                 } else {
-                    // totalFrames를 알 수 없는 경우, 최소한 0.0 이상으로 설정
                     0f.coerceAtLeast(0f)
                 }
                 progressCallback(progress)
                 
-                // 메모리 정리
                 frame.recycle()
-                processedFrame.recycle()
+                result.bitmap.recycle()
             }
             
             videoWriter.release()
+            
+            // 3DMM JSON 스트리밍 저장: 다운로드 폴더 시도 → 실패 시 폴백
+            fun writeJsonTo(file: java.io.File) {
+                file.bufferedWriter(Charsets.UTF_8).use { jsonWriter ->
+                    VideoExportStreaming.writeHeader(jsonWriter, VideoInfo(videoInfo.width, videoInfo.height, videoInfo.fps))
+                    exportFrames.forEachIndexed { i, fe ->
+                        VideoExportStreaming.writeFrame(jsonWriter, fe, i == 0)
+                    }
+                    VideoExportStreaming.writeFooter(jsonWriter)
+                }
+            }
+            val jsonFile = try {
+                writeJsonTo(jsonFileDownload)
+                jsonFileDownload
+            } catch (e: Exception) {
+                android.util.Log.w("VideoProcessor", "다운로드 폴더 저장 실패, 대체 경로 사용: ${e.message}")
+                writeJsonTo(jsonFileFallback)
+                jsonFileFallback
+            }
+            android.util.Log.i("VideoProcessor", "3DMM JSON 저장: ${jsonFile.absolutePath}")
             
             // 처리 완료 로그
             val totalProcessingTime = (System.currentTimeMillis() - processingStartTime) / 1000.0
@@ -145,6 +183,7 @@ class VideoProcessor(
             ProcessingResult(
                 success = true,
                 outputPath = outputPath,
+                exportJsonPath = jsonFile.absolutePath,
                 totalFrames = processedFrames,
                 totalFaces = totalFaces
             )
@@ -164,6 +203,9 @@ class VideoProcessor(
     fun release() {
         faceDetector?.release()
         faceDetector = null
+        landmarkDetector?.release()
+        landmarkDetector = null
+        frameProcessor?.release()
         frameProcessor = null
     }
 }
@@ -171,6 +213,7 @@ class VideoProcessor(
 data class ProcessingResult(
     val success: Boolean,
     val outputPath: String = "",
+    val exportJsonPath: String = "",
     val error: String = "",
     val totalFrames: Int = 0,
     val totalFaces: Int = 0

@@ -1,7 +1,9 @@
 package com.kmu_focus.focustest.processing.detector
 
 import android.content.Context
+import com.kmu_focus.focustest.processing.detector.landmark.yunet.FaceLandmarks5
 import android.graphics.Bitmap
+import android.graphics.PointF
 import android.os.SystemClock
 import android.util.Log
 import org.opencv.android.Utils
@@ -134,20 +136,30 @@ class YuNetOpenCVDetector(context: Context) : FaceDetector {
                     val row = faces.row(i)
                     val data = FloatArray(15)
                     row.get(0, 0, data)
-                    
+
                     // 원본 크기로 좌표 복원
                     val x = (data[0] / scale).toInt()
                     val y = (data[1] / scale).toInt()
                     val width = (data[2] / scale).toInt()
                     val height = (data[3] / scale).toInt()
                     val confidence = data[14]
-                    
+
+                    // 5-point 랜드마크 추출 (인덱스 4-13)
+                    // YuNet 출력: [x, y, w, h, re_x, re_y, le_x, le_y, nose_x, nose_y, rm_x, rm_y, lm_x, lm_y, conf]
+                    val landmarks = FaceLandmarks5(
+                        rightEye = PointF(data[4] / scale, data[5] / scale),
+                        leftEye = PointF(data[6] / scale, data[7] / scale),
+                        nose = PointF(data[8] / scale, data[9] / scale),
+                        rightMouth = PointF(data[10] / scale, data[11] / scale),
+                        leftMouth = PointF(data[12] / scale, data[13] / scale)
+                    )
+
                     val clippedX = x.coerceIn(0, frame.width - 1)
                     val clippedY = y.coerceIn(0, frame.height - 1)
                     val clippedWidth = width.coerceIn(1, frame.width - clippedX)
                     val clippedHeight = height.coerceIn(1, frame.height - clippedY)
-                    
-                    result.add(DetectedFace(clippedX, clippedY, clippedWidth, clippedHeight, confidence))
+
+                    result.add(DetectedFace(clippedX, clippedY, clippedWidth, clippedHeight, confidence, landmarks))
                 }
             }
             
