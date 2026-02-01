@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kmu_focus.focustest.processing.ProcessingResult
 import com.kmu_focus.focustest.processing.VideoProcessor
+import com.kmu_focus.focustest.processing.detector.tracking.TrackingMethod
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +33,7 @@ class MainViewModel : ViewModel() {
     
     private val _result = MutableStateFlow<ProcessingResult?>(null)
     val result: StateFlow<ProcessingResult?> = _result.asStateFlow()
-    
+
     private var videoProcessor: VideoProcessor? = null
     
     fun setVideoUri(uri: Uri) {
@@ -62,6 +63,7 @@ class MainViewModel : ViewModel() {
                 val result = videoProcessor!!.processVideo(
                     videoUri = videoUri,
                     outputPath = tempFile.absolutePath,
+                    trackingMethod = TrackingMethod.IoU_3DMM,
                     progressCallback = { progress ->
                         _progress.value = progress
                     }

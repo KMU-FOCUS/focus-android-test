@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.Rect
 import com.kmu_focus.focustest.processing.detector.FaceDetector
 import com.kmu_focus.focustest.processing.detector.landmark.model3d.FacialLandmarkDetector
+import com.kmu_focus.focustest.processing.detector.tracking.FaceTracker
 
 /**
  * 프레임 처리 결과 (비트맵 + 서버 전송용 3DMM export)
@@ -18,33 +19,40 @@ data class ProcessedFrameResult(
 
 /**
  * 프레임 처리기
- * 얼굴 검출 + 랜드마크 검출 + 시각화 + 타원 모자이크
+ * 얼굴 검출 + 랜드마크 검출 + 추적 + 시각화 + 타원 모자이크
  */
 class FrameProcessor(
     private val faceDetector: FaceDetector,
-    private val landmarkDetector: FacialLandmarkDetector? = null
+    private val landmarkDetector: FacialLandmarkDetector? = null,
+    private val faceTracker: FaceTracker? = null
 ) {
 
     companion object {
-        /** 3DMM 랜드마크 시각화 (서버 전송용만 쓸 경우 false) */
-        @JvmStatic
-        var drawLandmarks: Boolean = false
-
-        /** 5-point 랜드마크 시각화 활성화 */
-        @JvmStatic
-        var draw5PointLandmarks: Boolean = true
-
-        /** 타원 근사 얼굴 영역 표시 */
-        @JvmStatic
-        var drawFaceEllipse: Boolean = true
-
         /** 얼굴 모자이크 적용 */
         @JvmStatic
         var applyFaceMosaic: Boolean = false
 
-        /** 모자이크 블록 크기 */
         @JvmStatic
         var mosaicBlockSize: Int = 15
+
+        /** ID별 박스 색상 (구분용) */
+        private val TRACK_COLORS = intArrayOf(
+            Color.rgb(255, 0, 0),
+            Color.rgb(0, 255, 0),
+            Color.rgb(0, 0, 255),
+            Color.rgb(255, 255, 0),
+            Color.rgb(255, 0, 255),
+            Color.rgb(0, 255, 255),
+            Color.rgb(255, 165, 0),
+            Color.rgb(128, 0, 255),
+            Color.rgb(0, 255, 128),
+            Color.rgb(255, 128, 0),
+            Color.rgb(128, 255, 0),
+            Color.rgb(0, 128, 255),
+            Color.rgb(255, 0, 128),
+            Color.rgb(128, 128, 255),
+            Color.rgb(255, 128, 255)
+        )
     }
     
     /**
@@ -62,13 +70,26 @@ class FrameProcessor(
         val detectedFaces = faceDetector.detectFaces(frame)
             .filter { it.confidence >= 0.5f }
 
-        // 서버 전송용 3DMM 수집 (frameIndex/timestamp 있을 때)
-        val frameExport: FrameExport? = if (frameIndex != null && timestamp != null) {
-            val facesExport = detectedFaces.mapIndexed { idx, face ->
+        val raw3dmmList = if (detectedFaces.isNotEmpty() && (frameIndex != null || landmarkDetector != null)) {
+            detectedFaces.map { face ->
                 val faceRect = Rect(face.x, face.y, face.x + face.width, face.y + face.height)
-                val raw3dmm = landmarkDetector?.detectLandmarks(frame, faceRect)?.raw3DMM
+                landmarkDetector?.detectLandmarks(frame, faceRect)?.raw3DMM
+            }
+        } else emptyList()
+
+        val trackingIds: List<Int> = if (frameIndex != null && detectedFaces.isNotEmpty()) {
+            val detections = detectedFaces.map { intArrayOf(it.x, it.y, it.width, it.height) }
+            faceTracker?.update(detections, raw3dmmList.map { it?.idCoeffs })
+                ?: detectedFaces.indices.toList()
+        } else {
+            detectedFaces.indices.toList()
+        }
+
+        val frameExport: FrameExport? = if (frameIndex != null && timestamp != null && detectedFaces.isNotEmpty()) {
+            val facesExport = detectedFaces.mapIndexed { idx, face ->
+                val raw3dmm = raw3dmmList.getOrNull(idx)
                 FaceExport(
-                    trackingId = idx,
+                    trackingId = trackingIds.getOrElse(idx) { idx },
                     bbox = intArrayOf(face.x, face.y, face.width, face.height),
                     idCoeffs = raw3dmm?.idCoeffs,
                     expCoeffs = raw3dmm?.expCoeffs,
@@ -99,91 +120,33 @@ class FrameProcessor(
             frame.copy(Bitmap.Config.ARGB_8888, true)
         }
 
-        // 캔버스 및 페인트 준비
         val canvas = Canvas(result)
         val paint = Paint().apply {
             style = Paint.Style.STROKE
             strokeWidth = 4f
+            isAntiAlias = true
         }
-
         val textPaint = Paint().apply {
             color = Color.WHITE
             textSize = 24f
             isAntiAlias = true
         }
 
-        for (face in detectedFaces) {
+        for ((idx, face) in detectedFaces.withIndex()) {
             val x = face.x
             val y = face.y
             val width = face.width
             val height = face.height
-            val confidence = face.confidence
-
-            // 신뢰도에 따라 색상
-            val color = when {
-                confidence < 0.6f -> Color.rgb(255, 165, 0)  // 주황
-                confidence < 0.8f -> Color.rgb(255, 255, 0)  // 노랑
-                else -> Color.rgb(0, 255, 0)  // 초록
-            }
+            val trackId = trackingIds.getOrElse(idx) { idx }
+            val color = TRACK_COLORS[trackId % TRACK_COLORS.size]
 
             paint.color = color
-
-            // 바운딩 박스 그리기
             canvas.drawRect(Rect(x, y, x + width, y + height), paint)
 
-            // 신뢰도 텍스트
             textPaint.color = color
-            val confidenceText = String.format("%.2f", confidence)
-            val textY = (y - 10).toFloat().coerceAtLeast(textPaint.textSize)
-            canvas.drawText(confidenceText, x.toFloat(), textY, textPaint)
-
-            // 5-point 랜드마크 시각화
-            if (draw5PointLandmarks && face.landmarks != null) {
-                val lm = face.landmarks
-                val landmarkPaint = Paint().apply {
-                    this.color = Color.MAGENTA
-                    style = Paint.Style.FILL
-                    isAntiAlias = true
-                }
-
-                // 5개 포인트 그리기
-                canvas.drawCircle(lm.rightEye.x, lm.rightEye.y, 4f, landmarkPaint)
-                canvas.drawCircle(lm.leftEye.x, lm.leftEye.y, 4f, landmarkPaint)
-                landmarkPaint.color = Color.YELLOW
-                canvas.drawCircle(lm.nose.x, lm.nose.y, 4f, landmarkPaint)
-                landmarkPaint.color = Color.CYAN
-                canvas.drawCircle(lm.rightMouth.x, lm.rightMouth.y, 4f, landmarkPaint)
-                canvas.drawCircle(lm.leftMouth.x, lm.leftMouth.y, 4f, landmarkPaint)
-            }
-
-            // 타원 근사 얼굴 영역 시각화
-            if (drawFaceEllipse && face.landmarks != null) {
-                val ellipsePaint = Paint().apply {
-                    this.color = Color.argb(180, 0, 255, 255)  // 반투명 시안
-                    style = Paint.Style.STROKE
-                    strokeWidth = 2f
-                    isAntiAlias = true
-                }
-                FaceEllipseMask.drawEllipseOutline(canvas, face.landmarks, ellipsePaint)
-            }
-
-            // 3DMM 기반 랜드마크 검출 (FacialLandmarkDetector 사용 시)
-            if (drawLandmarks && landmarkDetector != null) {
-                val faceRect = Rect(x, y, x + width, y + height)
-                val landmarks = landmarkDetector.detectLandmarks(result, faceRect)
-
-                if (landmarks != null) {
-                    val landmarkPaint = Paint().apply {
-                        this.color = Color.CYAN
-                        style = Paint.Style.FILL
-                        isAntiAlias = true
-                    }
-
-                    for (lm in landmarks.getAbsoluteLandmarks()) {
-                        canvas.drawCircle(lm.x, lm.y, 2f, landmarkPaint)
-                    }
-                }
-            }
+            val labelText = "ID:$trackId"
+            val textY = (y - 8).toFloat().coerceAtLeast(textPaint.textSize)
+            canvas.drawText(labelText, x.toFloat(), textY, textPaint)
         }
 
         return ProcessedFrameResult(result, frameExport)

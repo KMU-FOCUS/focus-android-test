@@ -141,16 +141,22 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             style = MaterialTheme.typography.headlineMedium
         )
         
-        // 검출기 정보 표시 (고정: YuNet OpenCV, inputSize=480)
+        // 검출기 정보 표시
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
-            Text(
-                text = "검출기: YuNet OpenCV (CPU, 480px)",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(12.dp)
-            )
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = "검출기: YuNet OpenCV (CPU, 480px)",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    text = "추적: IoU + 3DMM (id_coeffs)",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
         }
         
         // 동영상 선택
@@ -270,12 +276,14 @@ fun AcceleratorButton(
     text: String,
     selected: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
     if (selected) {
         Button(
             onClick = onClick,
             modifier = modifier,
+            enabled = enabled,
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary
             )
@@ -285,7 +293,8 @@ fun AcceleratorButton(
     } else {
         OutlinedButton(
             onClick = onClick,
-            modifier = modifier
+            modifier = modifier,
+            enabled = enabled
         ) {
             Text(text)
         }

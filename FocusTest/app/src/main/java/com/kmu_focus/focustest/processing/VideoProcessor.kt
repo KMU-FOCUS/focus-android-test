@@ -6,6 +6,8 @@ import android.os.Environment
 import com.kmu_focus.focustest.processing.detector.FaceDetector
 import com.kmu_focus.focustest.processing.detector.YuNetOpenCVDetector
 import com.kmu_focus.focustest.processing.detector.landmark.model3d.FacialLandmarkDetector
+import com.kmu_focus.focustest.processing.detector.tracking.TrackingMethod
+import com.kmu_focus.focustest.processing.detector.tracking.createFaceTracker
 import com.kmu_focus.focustest.processing.video.FileVideoSource
 import com.kmu_focus.focustest.processing.video.OpenCVVideoWriter
 import org.opencv.android.OpenCVLoader
@@ -30,11 +32,13 @@ class VideoProcessor(
      * 비디오 처리 실행
      * @param videoUri 입력 비디오 URI
      * @param outputPath 출력 파일 경로
+     * @param trackingMethod 얼굴 추적 방식 (고정: IoU+3DMM)
      * @param progressCallback 진행률 콜백 (0.0 ~ 1.0)
      */
     suspend fun processVideo(
         videoUri: Uri,
         outputPath: String,
+        trackingMethod: TrackingMethod = TrackingMethod.IoU_3DMM,
         progressCallback: (Float) -> Unit
     ): ProcessingResult = withContext(Dispatchers.Default) {
         
@@ -64,7 +68,9 @@ class VideoProcessor(
         }
         
         if (frameProcessor == null) {
-            frameProcessor = FrameProcessor(faceDetector!!, landmarkDetector)
+            val faceTracker = createFaceTracker(trackingMethod)
+            frameProcessor = FrameProcessor(faceDetector!!, landmarkDetector, faceTracker)
+            android.util.Log.i("VideoProcessor", "추적 방식: IoU + 3DMM")
         }
         
         val videoSource = FileVideoSource(context, videoUri)
@@ -117,7 +123,10 @@ class VideoProcessor(
                 val timestamp = processedFrames / fps
                 val result = frameProcessor!!.processFrame(frame, processedFrames, timestamp)
                 
-                result.frameExport?.let { exportFrames.add(it) }
+                result.frameExport?.let { fe ->
+                    exportFrames.add(fe)
+                    totalFaces += fe.faces.size
+                }
                 videoWriter.writeFrame(result.bitmap)
                 
                 processedFrames++
