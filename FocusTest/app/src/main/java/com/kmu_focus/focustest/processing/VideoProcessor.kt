@@ -6,6 +6,10 @@ import android.os.Environment
 import com.kmu_focus.focustest.processing.detector.FaceDetector
 import com.kmu_focus.focustest.processing.detector.YuNetOpenCVDetector
 import com.kmu_focus.focustest.processing.detector.landmark.model3d.FacialLandmarkDetector
+import com.kmu_focus.focustest.processing.detector.recognition.ArcFaceEmbeddingExtractor
+import com.kmu_focus.focustest.processing.detector.recognition.OwnerEmbeddingStore
+import com.kmu_focus.focustest.processing.detector.recognition.OwnerOtherClassifier
+import com.kmu_focus.focustest.processing.detector.recognition.TrackLabelState
 import com.kmu_focus.focustest.processing.detector.tracking.TrackingMethod
 import com.kmu_focus.focustest.processing.detector.tracking.createFaceTracker
 import com.kmu_focus.focustest.processing.video.FileVideoSource
@@ -27,6 +31,7 @@ class VideoProcessor(
     private var faceDetector: FaceDetector? = null
     private var landmarkDetector: FacialLandmarkDetector? = null
     private var frameProcessor: FrameProcessor? = null
+    private var embeddingExtractor: ArcFaceEmbeddingExtractor? = null
     
     /**
      * 비디오 처리 실행
@@ -69,7 +74,35 @@ class VideoProcessor(
         
         if (frameProcessor == null) {
             val faceTracker = createFaceTracker(trackingMethod)
-            frameProcessor = FrameProcessor(faceDetector!!, landmarkDetector, faceTracker)
+            var recognitionExtractor: ArcFaceEmbeddingExtractor? = null
+            var trackLabelState: TrackLabelState? = null
+            try {
+                val arcFace = ArcFaceEmbeddingExtractor(context)
+                val ownerStore = OwnerEmbeddingStore(context, faceDetector!!, arcFace)
+                val masterEmbedding = ownerStore.loadOwnerEmbeddings()
+                if (masterEmbedding.isNotEmpty()) {
+                    recognitionExtractor = arcFace
+                    val classifier = OwnerOtherClassifier(masterEmbedding, 0.4f)
+                    trackLabelState = TrackLabelState(
+                        classifier,
+                        skipFrames = FrameProcessor.SKIP_FRAMES,
+                        collectFrames = FrameProcessor.COLLECT_FRAMES
+                    )
+                    android.util.Log.i("VideoProcessor", "Owner/Other 판별: Master ${masterEmbedding.size}명, 임계값 0.4")
+                } else {
+                    arcFace.release()
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("VideoProcessor", "Owner/Other 판별 초기화 실패 (무시): ${e.message}")
+            }
+            embeddingExtractor = recognitionExtractor
+            frameProcessor = FrameProcessor(
+                faceDetector!!,
+                landmarkDetector,
+                faceTracker,
+                recognitionExtractor,
+                trackLabelState
+            )
             android.util.Log.i("VideoProcessor", "추적: IoU+3DMM")
         }
         
@@ -216,6 +249,8 @@ class VideoProcessor(
         landmarkDetector = null
         frameProcessor?.release()
         frameProcessor = null
+        embeddingExtractor?.release()
+        embeddingExtractor = null
     }
 }
 

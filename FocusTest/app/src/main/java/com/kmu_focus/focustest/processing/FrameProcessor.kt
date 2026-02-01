@@ -7,6 +7,9 @@ import android.graphics.Paint
 import android.graphics.Rect
 import com.kmu_focus.focustest.processing.detector.FaceDetector
 import com.kmu_focus.focustest.processing.detector.landmark.model3d.FacialLandmarkDetector
+import com.kmu_focus.focustest.processing.detector.recognition.ArcFaceEmbeddingExtractor
+import com.kmu_focus.focustest.processing.detector.recognition.FaceAlignment
+import com.kmu_focus.focustest.processing.detector.recognition.TrackLabelState
 import com.kmu_focus.focustest.processing.detector.tracking.FaceTracker
 
 /**
@@ -19,12 +22,14 @@ data class ProcessedFrameResult(
 
 /**
  * 프레임 처리기
- * 얼굴 검출 + 랜드마크 검출 + 추적 + 시각화 + 타원 모자이크
+ * 얼굴 검출 + 랜드마크 검출 + 추적 + (선택) Owner/Other 판별 + 시각화 + 타원 모자이크
  */
 class FrameProcessor(
     private val faceDetector: FaceDetector,
     private val landmarkDetector: FacialLandmarkDetector? = null,
-    private val faceTracker: FaceTracker? = null
+    private val faceTracker: FaceTracker? = null,
+    private val embeddingExtractor: ArcFaceEmbeddingExtractor? = null,
+    private val trackLabelState: TrackLabelState? = null
 ) {
 
     companion object {
@@ -35,11 +40,18 @@ class FrameProcessor(
         @JvmStatic
         var mosaicBlockSize: Int = 15
 
-        /** tracking_id별 박스 색상 */
+        /** Owner/Other: 앞 N프레임 스킵(얼굴 잘릴 가능성) */
+        const val SKIP_FRAMES = 5
+        /** Owner/Other: 스킵 후 수집할 프레임 수 (이만큼 모이면 판별) */
+        const val COLLECT_FRAMES = 3
+
+        /** tracking_id별 박스 색상 (Owner/Other 미사용 시) */
         private val TRACK_COLORS = intArrayOf(
             Color.rgb(255, 0, 0), Color.rgb(0, 255, 0), Color.rgb(0, 0, 255),
             Color.rgb(255, 255, 0), Color.rgb(255, 0, 255), Color.rgb(0, 255, 255)
         )
+        /** 뒷모습/가려진 얼굴(랜드마크 미판별) 박스 색상 */
+        private val GRAY_BOX_COLOR = Color.GRAY
     }
     
     /**
@@ -87,6 +99,53 @@ class FrameProcessor(
             FrameExport(frameNumber = frameIndex, timestamp = timestamp, faces = facesExport)
         } else null
 
+        // 랜드마크 유효 여부: 3DMM 성공 시에만 인식 가능(뒷모습/가림은 스킵 → 속도 개선)
+        fun hasValidLandmarks(idx: Int): Boolean =
+            if (landmarkDetector != null) raw3dmmList.getOrNull(idx) != null
+            else detectedFaces.getOrNull(idx)?.landmarks != null
+
+        // Owner/Other 판별: 랜드마크 완전 판별된 얼굴만 ArcFace 검사
+        trackLabelState?.beginFrame(trackingIds.toSet())
+        val recheckedThisFrame = mutableSetOf<Int>()
+        if (embeddingExtractor != null && trackLabelState != null && detectedFaces.isNotEmpty()) {
+            for (idx in detectedFaces.indices) {
+                if (!hasValidLandmarks(idx)) continue
+                val face = detectedFaces[idx]
+                val trackId = trackingIds.getOrElse(idx) { idx }
+                trackLabelState!!.recordFrameSeen(trackId)
+                val isRecognitionFriendly = face.landmarks?.isFrontal(0.4f) ?: false
+                if (!trackLabelState!!.needsEmbeddingThisFrame(trackId, isRecognitionFriendly)) continue
+                val rect = Rect(face.x, face.y, face.x + face.width, face.y + face.height)
+                if (rect.width() < 16 || rect.height() < 16) continue
+                var crop = Bitmap.createBitmap(
+                    frame,
+                    rect.left.coerceIn(0, frame.width - 1),
+                    rect.top.coerceIn(0, frame.height - 1),
+                    rect.width().coerceIn(1, frame.width - rect.left),
+                    rect.height().coerceIn(1, frame.height - rect.top)
+                )
+                face.landmarks?.let { lm ->
+                    val aligned = FaceAlignment.alignFaceForRecognition(crop, lm, rect)
+                    if (aligned != crop) {
+                        crop.recycle()
+                        crop = aligned
+                    }
+                }
+                embeddingExtractor.extractEmbedding(crop)?.let { emb ->
+                    val label = trackLabelState.getLabel(trackId)
+                    when (label) {
+                        null -> trackLabelState.addEmbedding(trackId, emb)
+                        false -> {
+                            trackLabelState.recheckFrontal(trackId, emb)
+                            recheckedThisFrame.add(trackId)
+                        }
+                        true -> { /* OWNER: 추가 검사 없음 */ }
+                    }
+                }
+                crop.recycle()
+            }
+        }
+
         if (detectedFaces.isEmpty()) {
             return ProcessedFrameResult(frame, frameExport)
         }
@@ -120,20 +179,49 @@ class FrameProcessor(
             isAntiAlias = true
         }
 
+        val useOwnerOther = trackLabelState != null
+
         for ((idx, face) in detectedFaces.withIndex()) {
             val x = face.x
             val y = face.y
             val width = face.width
             val height = face.height
             val trackId = trackingIds.getOrElse(idx) { idx }
-            val color = TRACK_COLORS[trackId % TRACK_COLORS.size]
+            val validLandmarks = hasValidLandmarks(idx)
+
+            val (color, labelText) = when {
+                !validLandmarks -> GRAY_BOX_COLOR to "ID:$trackId -"
+                useOwnerOther -> {
+                    if (trackId in recheckedThisFrame) {
+                        Color.rgb(255, 255, 0) to "ID:$trackId 1/1"
+                    } else {
+                        val label = trackLabelState!!.getLabel(trackId)
+                        when (label) {
+                            true -> Color.rgb(0, 255, 0) to "ID:$trackId OWNER"
+                            false -> Color.rgb(255, 0, 0) to "ID:$trackId OTHER"
+                            null -> {
+                                val framesSeen = trackLabelState!!.getFramesSeen(trackId)
+                                val collectFrames = trackLabelState!!.getCollectFrames()
+                                val lbl = if (framesSeen <= SKIP_FRAMES) {
+                                    "ID:$trackId 대기"
+                                } else {
+                                    val hits = trackLabelState!!.getEmbeddingCount(trackId).coerceAtMost(collectFrames)
+                                    "ID:$trackId $hits/$collectFrames"
+                                }
+                                Color.rgb(255, 255, 0) to lbl
+                            }
+                        }
+                    }
+                }
+                else -> TRACK_COLORS[trackId % TRACK_COLORS.size] to "ID:$trackId"
+            }
 
             paint.color = color
             canvas.drawRect(Rect(x, y, x + width, y + height), paint)
 
             textPaint.color = color
             val textY = (y - 8).toFloat().coerceAtLeast(textPaint.textSize)
-            canvas.drawText("ID:$trackId", x.toFloat(), textY, textPaint)
+            canvas.drawText(labelText, x.toFloat(), textY, textPaint)
         }
 
         return ProcessedFrameResult(result, frameExport)
