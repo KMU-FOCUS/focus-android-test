@@ -1,4 +1,4 @@
-package com.kmu_focus.focustest.processing
+package com.kmu_focus.focustest.processing.video
 
 import android.graphics.Bitmap
 import android.media.MediaCodec
@@ -6,7 +6,6 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import java.io.File
-import java.nio.ByteBuffer
 
 /**
  * 비디오 작성기

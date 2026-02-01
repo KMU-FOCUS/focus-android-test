@@ -1,12 +1,14 @@
 package com.kmu_focus.focustest.processing
 
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.net.Uri
+import com.kmu_focus.focustest.processing.detector.FaceDetector
+import com.kmu_focus.focustest.processing.detector.YuNetOpenCVDetector
+import com.kmu_focus.focustest.processing.video.FileVideoSource
+import com.kmu_focus.focustest.processing.video.OpenCVVideoWriter
 import org.opencv.android.OpenCVLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /**
  * 비디오 처리 파이프라인
@@ -17,11 +19,6 @@ class VideoProcessor(
     private val context: Context
 ) {
     
-    companion object {
-        /** 사용할 검출기 타입 */
-        @JvmStatic
-        var detectorType: DetectorType = DetectorType.YOLO_TFLITE
-    }
     
     private var faceDetector: FaceDetector? = null
     private var frameProcessor: FrameProcessor? = null
@@ -46,13 +43,10 @@ class VideoProcessor(
             )
         }
         
-        // 초기화 - 검출기 타입에 따라 생성
+        // 초기화 - YuNet OpenCV 고정 (inputSize=480)
         if (faceDetector == null) {
-            faceDetector = when (detectorType) {
-                DetectorType.YOLO_TFLITE -> YuNetFaceDetector(context)      // YOLO TFLite + NNAPI
-                DetectorType.YUNET_ONNX -> YuNetOnnxDetector(context)       // YuNet ONNX Runtime + NNAPI
-                DetectorType.YUNET_OPENCV -> YuNetOpenCVDetector(context)   // YuNet OpenCV (CPU)
-            }
+            YuNetOpenCVDetector.inputSize = 480
+            faceDetector = YuNetOpenCVDetector(context)
             android.util.Log.i("VideoProcessor", "검출기 초기화: ${faceDetector!!.getDetectorType()}")
         }
         
@@ -73,7 +67,7 @@ class VideoProcessor(
         android.util.Log.i("VideoProcessor", "  - 재생 시간: ${String.format("%.1f", durationSec)}초")
         android.util.Log.i("VideoProcessor", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         
-        // VideoWriter 초기화 (OpenCV 사용으로 변경)
+        // VideoWriter 초기화 (Surface 기반)
         val videoWriter = OpenCVVideoWriter(
             outputPath,
             videoInfo.width,
@@ -90,26 +84,14 @@ class VideoProcessor(
         val processingStartTime = System.currentTimeMillis()
         
         try {
-            var firstFrameSkipped = false
-            
             while (true) {
                 val frameStart = System.currentTimeMillis()
                 
                 val frame = videoSource.readFrame()
                 if (frame == null) break
                 
-                // 프레임 처리 (Python: 얼굴 검출 → 바운딩 박스 그리기)
+                // 프레임 처리 (얼굴 검출 → 바운딩 박스 그리기)
                 val processedFrame = frameProcessor!!.processFrame(frame)
-                
-                // 첫 프레임은 스킵 (인코더 초기화 문제 방지)
-                if (!firstFrameSkipped) {
-                    firstFrameSkipped = true
-                    frame.recycle()
-                    if (processedFrame != frame) {
-                        processedFrame.recycle()
-                    }
-                    continue
-                }
                 
                 // 비디오에 쓰기
                 videoWriter.writeFrame(processedFrame)

@@ -1,4 +1,4 @@
-package com.kmu_focus.focustest.processing
+package com.kmu_focus.focustest.processing.detector
 
 import android.graphics.Bitmap
 
@@ -24,13 +24,4 @@ data class DetectedFace(
     fun toRect(): android.graphics.Rect {
         return android.graphics.Rect(x, y, x + width, y + height)
     }
-}
-
-/**
- * 검출기 타입
- */
-enum class DetectorType {
-    YOLO_TFLITE,   // YOLOv12n + TFLite + NNAPI (NPU)
-    YUNET_ONNX,    // YuNet + ONNX Runtime + NNAPI (NPU) - 느림
-    YUNET_OPENCV   // YuNet + OpenCV (CPU) - 빠름
 }

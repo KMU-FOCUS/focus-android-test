@@ -4,9 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
-import org.opencv.android.Utils
-import org.opencv.core.Mat
-import org.opencv.imgproc.Imgproc
+import com.kmu_focus.focustest.processing.detector.FaceDetector
 
 /**
  * 프레임 처리기
@@ -24,8 +22,9 @@ class FrameProcessor(
      * @return 처리된 프레임 (바운딩 박스 그려진 프레임)
      */
     fun processFrame(frame: Bitmap): Bitmap {
-        // 얼굴 검출 (Python: _, faces = detector.detect(small_image))
+        // 얼굴 검출 (confidence 0.5 이상만 필터링)
         val detectedFaces = faceDetector.detectFaces(frame)
+            .filter { it.confidence >= 0.5f }
         
         // 얼굴이 없으면 원본 반환 (불필요한 복사 방지)
         if (detectedFaces.isEmpty()) {

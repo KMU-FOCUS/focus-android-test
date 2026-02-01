@@ -41,10 +41,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.kmu_focus.focustest.processing.DetectorType
-import com.kmu_focus.focustest.processing.VideoProcessor
-import com.kmu_focus.focustest.processing.YuNetFaceDetector
-import com.kmu_focus.focustest.processing.YuNetOpenCVDetector
 import com.kmu_focus.focustest.ui.theme.FocusTestTheme
 import kotlinx.coroutines.launch
 import org.opencv.android.OpenCVLoader
@@ -132,20 +128,6 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
         }
     }
     
-    // 검출기 타입 상태
-    var selectedDetector by remember {
-        mutableStateOf(VideoProcessor.detectorType)
-    }
-    
-    // 가속기 모드 상태 (YOLO TFLite용)
-    var selectedMode by remember { 
-        mutableStateOf(YuNetFaceDetector.acceleratorMode) 
-    }
-    
-    // YuNet OpenCV 입력 크기 상태
-    var selectedInputSize by remember {
-        mutableStateOf(YuNetOpenCVDetector.inputSize)
-    }
     
     Column(
         modifier = Modifier
@@ -159,143 +141,16 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             style = MaterialTheme.typography.headlineMedium
         )
         
-        // 검출기 선택 UI
+        // 검출기 정보 표시 (고정: YuNet OpenCV, inputSize=480)
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "검출기 선택",
-                    style = MaterialTheme.typography.titleSmall
-                )
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    AcceleratorButton(
-                        text = "YOLO\nNNAPI",
-                        selected = selectedDetector == DetectorType.YOLO_TFLITE,
-                        onClick = {
-                            selectedDetector = DetectorType.YOLO_TFLITE
-                            VideoProcessor.detectorType = selectedDetector
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                    AcceleratorButton(
-                        text = "YuNet\nOpenCV",
-                        selected = selectedDetector == DetectorType.YUNET_OPENCV,
-                        onClick = {
-                            selectedDetector = DetectorType.YUNET_OPENCV
-                            VideoProcessor.detectorType = selectedDetector
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                    AcceleratorButton(
-                        text = "YuNet\nONNX",
-                        selected = selectedDetector == DetectorType.YUNET_ONNX,
-                        onClick = {
-                            selectedDetector = DetectorType.YUNET_ONNX
-                            VideoProcessor.detectorType = selectedDetector
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                
-                // YuNet OpenCV 선택 시 입력 크기 옵션 표시
-                if (selectedDetector == DetectorType.YUNET_OPENCV) {
-                    Text(
-                        text = "입력 크기 (작을수록 빠름)",
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AcceleratorButton(
-                            text = "160",
-                            selected = selectedInputSize == 160,
-                            onClick = { 
-                                selectedInputSize = 160
-                                YuNetOpenCVDetector.inputSize = 160 
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        AcceleratorButton(
-                            text = "320",
-                            selected = selectedInputSize == 320,
-                            onClick = { 
-                                selectedInputSize = 320
-                                YuNetOpenCVDetector.inputSize = 320 
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        AcceleratorButton(
-                            text = "480",
-                            selected = selectedInputSize == 480,
-                            onClick = { 
-                                selectedInputSize = 480
-                                YuNetOpenCVDetector.inputSize = 480 
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-                
-                // YOLO TFLite 선택 시 가속기 옵션 표시
-                if (selectedDetector == DetectorType.YOLO_TFLITE) {
-                    Text(
-                        text = "가속기 (YOLO용)",
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AcceleratorButton(
-                            text = "NNAPI",
-                            selected = selectedMode == YuNetFaceDetector.Companion.AcceleratorMode.NPU_NNAPI,
-                            onClick = {
-                                selectedMode = YuNetFaceDetector.Companion.AcceleratorMode.NPU_NNAPI
-                                YuNetFaceDetector.acceleratorMode = selectedMode
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        AcceleratorButton(
-                            text = "GPU",
-                            selected = selectedMode == YuNetFaceDetector.Companion.AcceleratorMode.GPU,
-                            onClick = {
-                                selectedMode = YuNetFaceDetector.Companion.AcceleratorMode.GPU
-                                YuNetFaceDetector.acceleratorMode = selectedMode
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        AcceleratorButton(
-                            text = "CPU",
-                            selected = selectedMode == YuNetFaceDetector.Companion.AcceleratorMode.CPU,
-                            onClick = {
-                                selectedMode = YuNetFaceDetector.Companion.AcceleratorMode.CPU
-                                YuNetFaceDetector.acceleratorMode = selectedMode
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-                
-                Text(
-                    text = "※ 변경 후 '처리 시작'하면 재초기화됨",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Text(
+                text = "검출기: YuNet OpenCV (CPU, 480px)",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(12.dp)
+            )
         }
         
         // 동영상 선택

@@ -1,4 +1,4 @@
-package com.kmu_focus.focustest.processing
+package com.kmu_focus.focustest.processing.video
 
 import android.graphics.Bitmap
 

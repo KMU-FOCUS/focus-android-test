@@ -1,4 +1,4 @@
-package com.kmu_focus.focustest.processing
+package com.kmu_focus.focustest.processing.video
 
 import android.graphics.Bitmap
 import android.graphics.Rect
@@ -92,6 +92,67 @@ class OpenCVVideoWriter(
         
         // Muxer 생성
         muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        
+        // 인코더 워밍업 (SPS/PPS 헤더 준비까지만)
+        warmupEncoder(width, height)
+    }
+    
+    /**
+     * 인코더 워밍업 - SPS/PPS 헤더가 준비될 때까지만 대기 (데이터는 muxer에 쓰지 않음)
+     */
+    private fun warmupEncoder(width: Int, height: Int) {
+        val surface = inputSurface ?: return
+        val encoder = encoder ?: return
+        
+        // 검은색 더미 프레임으로 인코더 활성화
+        repeat(3) {
+            try {
+                val canvas = surface.lockHardwareCanvas()
+                canvas.drawColor(android.graphics.Color.BLACK)
+                surface.unlockCanvasAndPost(canvas)
+                // 워밍업 중에는 muxer에 쓰지 않고 인코더 준비만
+                drainEncoderForWarmup()
+            } catch (e: Exception) {
+                // 무시
+            }
+        }
+        
+        // 워밍업 완료 후 리셋
+        frameIndex = 0
+        isFirstFrame = true
+        
+        android.util.Log.d(TAG, "인코더 워밍업 완료 (muxerStarted: $muxerStarted)")
+    }
+    
+    /**
+     * 워밍업용 drainEncoder - muxer 시작만 하고 실제 데이터는 버림
+     */
+    private fun drainEncoderForWarmup() {
+        val encoder = encoder ?: return
+        val muxer = muxer ?: return
+        
+        while (true) {
+            val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
+            
+            when {
+                outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> break
+                
+                outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    if (!muxerStarted) {
+                        val newFormat = encoder.outputFormat
+                        trackIndex = muxer.addTrack(newFormat)
+                        muxer.start()
+                        muxerStarted = true
+                        android.util.Log.d(TAG, "Muxer 시작됨 (워밍업 중)")
+                    }
+                }
+                
+                outputBufferIndex >= 0 -> {
+                    // 워밍업 데이터는 버림 (muxer에 쓰지 않음)
+                    encoder.releaseOutputBuffer(outputBufferIndex, false)
+                }
+            }
+        }
     }
     
     fun writeFrame(bitmap: Bitmap) {
