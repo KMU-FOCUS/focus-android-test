@@ -259,23 +259,33 @@ object FaceEllipseMask {
     }
 
     /**
+     * 타원 바운딩 박스 (원본 해상도 좌표).
+     */
+    fun getEllipseBounds(landmarks: FaceLandmarks5, paddingRatio: Float = 1.05f): RectF {
+        val ellipse = calculateEllipseParams(landmarks, paddingRatio)
+        return calculateEllipseBounds(ellipse)
+    }
+
+    /**
      * 바운딩 박스 영역 화질만 극단적으로 낮춤 (다운스케일 → 업스케일).
      * 픽셀 루프 없이 Bitmap.createScaledBitmap만 사용 → 연산량 최소.
      *
      * @param scaleDownFactor 1/n 해상도로 축소 (16 → 1/16 크기로 축소 후 복원)
+     * @param coordScale 좌표 스케일 (저해상도 버퍼에 그릴 때 예: 0.5f)
      */
     fun applyLowResInPlaceBbox(
         target: Bitmap,
         landmarks: FaceLandmarks5,
         scaleDownFactor: Int = 16,
-        paddingRatio: Float = 1.05f
+        paddingRatio: Float = 1.05f,
+        coordScale: Float = 1f
     ) {
         val ellipse = calculateEllipseParams(landmarks, paddingRatio)
         val bounds = calculateEllipseBounds(ellipse)
-        val left = bounds.left.toInt().coerceIn(0, target.width - 1)
-        val top = bounds.top.toInt().coerceIn(0, target.height - 1)
-        val right = bounds.right.toInt().coerceIn(1, target.width)
-        val bottom = bounds.bottom.toInt().coerceIn(1, target.height)
+        val left = (bounds.left * coordScale).toInt().coerceIn(0, target.width - 1)
+        val top = (bounds.top * coordScale).toInt().coerceIn(0, target.height - 1)
+        val right = (bounds.right * coordScale).toInt().coerceIn(1, target.width)
+        val bottom = (bounds.bottom * coordScale).toInt().coerceIn(1, target.height)
         if (right <= left || bottom <= top) return
         val w = right - left
         val h = bottom - top

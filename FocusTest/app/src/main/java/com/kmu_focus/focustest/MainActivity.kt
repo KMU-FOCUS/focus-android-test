@@ -25,6 +25,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -159,6 +160,37 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             }
         }
 
+        // 출력 비트레이트 (낮을수록 인코딩 빠름, 파일 작음)
+        var bitrateMultiplier by remember { mutableStateOf(0.75f) }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "출력 비트레이트",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "${(bitrateMultiplier * 100).toInt()}%",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Slider(
+                    value = bitrateMultiplier,
+                    onValueChange = { bitrateMultiplier = it },
+                    valueRange = 0.5f..1f,
+                    steps = 9,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
         // 동영상 선택
         Button(
             onClick = { videoPickerLauncher.launch("video/*") },
@@ -178,7 +210,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                 }
                 
                 scope.launch {
-                    viewModel.processVideo(context)
+                    viewModel.processVideo(context, bitrateMultiplier)
                 }
             },
             modifier = Modifier.fillMaxWidth(),

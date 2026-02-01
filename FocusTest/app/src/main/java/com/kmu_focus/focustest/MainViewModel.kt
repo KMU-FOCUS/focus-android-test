@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.kmu_focus.focustest.processing.ProcessingResult
 import com.kmu_focus.focustest.processing.VideoProcessor
 import com.kmu_focus.focustest.processing.detector.tracking.TrackingMethod
+import com.kmu_focus.focustest.processing.video.OpenCVVideoWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,8 +42,10 @@ class MainViewModel : ViewModel() {
         _result.value = null
     }
     
-    fun processVideo(context: Context) {
+    fun processVideo(context: Context, bitrateMultiplier: Float = 1f) {
         val videoUri = _videoUri.value ?: return
+        
+        OpenCVVideoWriter.bitrateMultiplier = bitrateMultiplier.coerceIn(0.5f, 1f)
         
         // 가속기 모드 변경 시 재초기화 필요하므로 항상 새로 생성
         videoProcessor?.release()

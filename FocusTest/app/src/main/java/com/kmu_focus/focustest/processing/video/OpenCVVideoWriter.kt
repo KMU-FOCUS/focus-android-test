@@ -25,6 +25,9 @@ class OpenCVVideoWriter(
         private const val TAG = "OpenCVVideoWriter"
         private const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_AVC
         private const val TIMEOUT_US = 10000L
+        /** 비트레이트 배율 (1f=기본, 0.5f=절반 → 인코딩 부하·파일 크기 감소) */
+        @JvmStatic
+        var bitrateMultiplier: Float = 1f
     }
     
     private var encoder: MediaCodec? = null
@@ -49,11 +52,12 @@ class OpenCVVideoWriter(
     
     private fun initialize(outputPath: String, width: Int, height: Int) {
         // 비디오 포맷 생성
+        val bitrate = (width * height * 4 * bitrateMultiplier).toInt().coerceIn(100_000, 50_000_000)
         val format = MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, width * height * 4) // 비트레이트
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1초마다 키프레임
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2) // 2초마다 키프레임 (I-frame 적으면 인코딩 약간 완화)
         }
         
         // 하드웨어 인코더 우선 선택
