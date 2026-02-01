@@ -48,7 +48,7 @@
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `tracking_id` | int | 프레임 내 얼굴 ID. 추후 트래킹 적용 시 동일 인물은 동일 ID 유지 |
+| `tracking_id` | int | 프레임 내 얼굴 ID. 동일 인물은 동일 ID 유지 |
 | `bbox` | int[4] | `[x, y, width, height]` 픽셀 단위 바운딩 박스 |
 | `3dmm` | object | **id_coeffs**, **exp_coeffs**, **pose** 세 필드 (계수만) |
 

@@ -42,4 +42,17 @@ data class FaceLandmarks5(
         val dy = leftEye.y - rightEye.y
         return kotlin.math.atan2(dy, dx)
     }
+
+    /**
+     * 정면 응시 여부 (YuNet 5점 기준)
+     * - 코가 두 눈 중심에서 벗어난 정도로 yaw 근사
+     * - 좌우 대칭이면 정면
+     */
+    fun isFrontal(symmetryThreshold: Float = 0.2f): Boolean {
+        val eyeCenterX = (leftEye.x + rightEye.x) / 2f
+        val eyeDist = getEyeDistance()
+        if (eyeDist < 1e-6f) return false
+        val noseOffset = kotlin.math.abs(nose.x - eyeCenterX) / eyeDist
+        return noseOffset < symmetryThreshold
+    }
 }

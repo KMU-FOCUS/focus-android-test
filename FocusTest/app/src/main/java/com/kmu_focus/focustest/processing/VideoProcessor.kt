@@ -70,7 +70,7 @@ class VideoProcessor(
         if (frameProcessor == null) {
             val faceTracker = createFaceTracker(trackingMethod)
             frameProcessor = FrameProcessor(faceDetector!!, landmarkDetector, faceTracker)
-            android.util.Log.i("VideoProcessor", "추적 방식: IoU + 3DMM")
+            android.util.Log.i("VideoProcessor", "추적: IoU+3DMM")
         }
         
         val videoSource = FileVideoSource(context, videoUri)

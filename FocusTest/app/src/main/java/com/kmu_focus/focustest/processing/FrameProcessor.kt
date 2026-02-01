@@ -35,23 +35,10 @@ class FrameProcessor(
         @JvmStatic
         var mosaicBlockSize: Int = 15
 
-        /** ID별 박스 색상 (구분용) */
+        /** tracking_id별 박스 색상 */
         private val TRACK_COLORS = intArrayOf(
-            Color.rgb(255, 0, 0),
-            Color.rgb(0, 255, 0),
-            Color.rgb(0, 0, 255),
-            Color.rgb(255, 255, 0),
-            Color.rgb(255, 0, 255),
-            Color.rgb(0, 255, 255),
-            Color.rgb(255, 165, 0),
-            Color.rgb(128, 0, 255),
-            Color.rgb(0, 255, 128),
-            Color.rgb(255, 128, 0),
-            Color.rgb(128, 255, 0),
-            Color.rgb(0, 128, 255),
-            Color.rgb(255, 0, 128),
-            Color.rgb(128, 128, 255),
-            Color.rgb(255, 128, 255)
+            Color.rgb(255, 0, 0), Color.rgb(0, 255, 0), Color.rgb(0, 0, 255),
+            Color.rgb(255, 255, 0), Color.rgb(255, 0, 255), Color.rgb(0, 255, 255)
         )
     }
     
@@ -88,8 +75,9 @@ class FrameProcessor(
         val frameExport: FrameExport? = if (frameIndex != null && timestamp != null && detectedFaces.isNotEmpty()) {
             val facesExport = detectedFaces.mapIndexed { idx, face ->
                 val raw3dmm = raw3dmmList.getOrNull(idx)
+                val trackId = trackingIds.getOrElse(idx) { idx }
                 FaceExport(
-                    trackingId = trackingIds.getOrElse(idx) { idx },
+                    trackingId = trackId,
                     bbox = intArrayOf(face.x, face.y, face.width, face.height),
                     idCoeffs = raw3dmm?.idCoeffs,
                     expCoeffs = raw3dmm?.expCoeffs,
@@ -144,9 +132,8 @@ class FrameProcessor(
             canvas.drawRect(Rect(x, y, x + width, y + height), paint)
 
             textPaint.color = color
-            val labelText = "ID:$trackId"
             val textY = (y - 8).toFloat().coerceAtLeast(textPaint.textSize)
-            canvas.drawText(labelText, x.toFloat(), textY, textPaint)
+            canvas.drawText("ID:$trackId", x.toFloat(), textY, textPaint)
         }
 
         return ProcessedFrameResult(result, frameExport)

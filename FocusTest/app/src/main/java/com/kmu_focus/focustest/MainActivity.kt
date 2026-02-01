@@ -152,13 +152,13 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
-                    text = "추적: IoU + 3DMM (id_coeffs)",
+                    text = "추적: IoU + 3DMM",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
         }
-        
+
         // 동영상 선택
         Button(
             onClick = { videoPickerLauncher.launch("video/*") },
